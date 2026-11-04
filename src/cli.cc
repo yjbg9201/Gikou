@@ -20,7 +20,9 @@
 #include "cli.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <vector>
 #include <unordered_map>
 #include "common/array.h"
@@ -28,6 +30,7 @@
 #include "book.h"
 #include "cluster.h"
 #include "consultation.h"
+#include "eval_tools.h"
 #include "gamedb.h"
 #include "learning.h"
 #include "mate1ply.h"
@@ -116,6 +119,45 @@ void Cli::ExecuteCommand(int argc, char* argv[]) {
     MoveProbability::Learn();
   } else if (command == "--compute-ratings") {
     ComputePlayerRatings();
+  } else if (command == "--randparams") {
+    // G3: テスト用のランダム params.bin を生成する
+    // 使い方: --randparams <出力ファイル> [seed] [amplitude]
+    const char* file_name = argc >= 3 ? argv[2] : "params.bin";
+    uint64_t seed = argc >= 4 ? std::strtoull(argv[3], nullptr, 10) : 1;
+    long amplitude = argc >= 5 ? std::strtol(argv[4], nullptr, 10) : 262144;
+    amplitude = std::max(0L, std::min(amplitude, 1L << 24));
+    bool ok = EvalTools::WriteRandomParams(file_name, seed, int32_t(amplitude));
+    std::printf("%s %s (seed=%llu, amplitude=%ld)\n", ok ? "Wrote" : "Failed to write",
+                file_name, (unsigned long long)seed, amplitude);
+    if (!ok) std::exit(1);
+  } else if (command == "--randsfen") {
+    // G3: ランダム自己対局による局面を生成し、SFENを標準出力に書き出す
+    // 使い方: --randsfen <局面数> [seed] [最大手数]
+    int num = argc >= 3 ? std::atoi(argv[2]) : 100;
+    uint64_t seed = argc >= 4 ? std::strtoull(argv[3], nullptr, 10) : 1;
+    int max_ply = argc >= 5 ? std::atoi(argv[4]) : 128;
+    EvalTools::GenerateRandomSfens(num, seed, max_ply, stdout);
+  } else if (command == "--evaldump") {
+    // G3: 局面ごとの評価値・進行度・項目別内訳を JSON Lines で出力する
+    // 使い方: --evaldump [入力ファイル]（省略時は標準入力）
+    int num_errors = 0;
+    if (argc >= 3 && std::string(argv[2]) != "-") {
+      std::ifstream in(argv[2]);
+      if (!in) {
+        std::fprintf(stderr, "Failed to open %s.\n", argv[2]);
+        std::exit(1);
+      }
+      num_errors = EvalTools::DumpEvaluation(in, stdout);
+    } else {
+      num_errors = EvalTools::DumpEvaluation(std::cin, stdout);
+    }
+    if (num_errors != 0) std::exit(1);
+  } else if (command == "--eval-selftest") {
+    // G3: PP対称性と、差分評価・全計算の一致を検査する
+    // 使い方: --eval-selftest [対局数] [seed]
+    int num_games = argc >= 3 ? std::atoi(argv[2]) : 20;
+    uint64_t seed = argc >= 4 ? std::strtoull(argv[3], nullptr, 10) : 1;
+    if (EvalTools::RunSelfTest(num_games, seed) != 0) std::exit(1);
   } else {
     std::printf("CLI: No such command. %s\n", command.c_str());
   }
