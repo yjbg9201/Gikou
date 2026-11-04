@@ -45,6 +45,16 @@ class Cli {
    *   - --learn-progress     進行度推定関数の学習を行う
    *   - --learn-probability  指し手の実現確率の学習を行う
    *   - --compute-ratings    棋譜DBファイルに登場するプレイヤーのレーティングを計算する
+   *   - --learn-psv          やねうら王のPSV教師で RootStrap + 勝敗回帰 を併用して学習する（G1）
+   *   - --learn-psv-rootstrap やねうら王のPSV教師で RootStrap を併用して学習する（G1）
+   *   - --convert-psv        やねうら王のPSV教師を teacher_positions.bin / teacher_games.bin に変換する（G1）
+   *   - --psv-selftest       PackedSfen / Move16 / PSV 変換のセルフテストを行う（G1）
+   *   - --sfen-pack / --sfen-unpack  SFEN と やねうら王互換PackedSfen を相互変換する（テスト用）
+   *   - --bench-yanebook     やねうら王定跡の読み込み時間・照合時間を計測する（G2）
+   *   - --randparams         テスト用のランダムな params.bin を生成する（G3）
+   *   - --randsfen           ランダム自己対局で局面を生成し、SFENを出力する（G3）
+   *   - --evaldump           局面ごとの評価値・進行度・項目別内訳を出力する（G3）
+   *   - --eval-selftest      PP対称性と、差分評価・全計算の一致を検査する（G3）
    */
   static void ExecuteCommand(int argc, char* argv[]);
 };

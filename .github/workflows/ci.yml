@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # G2 の book.bin 回帰テストで原本（ca25edf）をビルドするため
+
+      - name: Toolchain
+        run: g++ --version
+
+      - name: Build (release) and check warnings
+        run: tools/ci/check_warnings.sh release
+
+      - name: Build (gikou / MINIMUM) and check warnings
+        run: tools/ci/check_warnings.sh gikou
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python test dependencies
+        run: pip install cshogi numpy
+
+      - name: Self tests
+        run: tests/run_all.sh

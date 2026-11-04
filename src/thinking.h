@@ -30,6 +30,7 @@
 #include "signals.h"
 #include "thread.h"
 #include "time_manager.h"
+#include "yaneura_book.h"
 
 class Node;
 class UsiGoOptions;
@@ -94,6 +95,8 @@ class Thinking {
   std::mutex mutex_;
   std::condition_variable sleep_condition_;
   Book book_;
+  YaneuraOuBook yaneura_book_;   // やねうら王形式の定跡（G2）
+  bool use_yaneura_book_ = false; // BookFile がやねうら王形式なら true
   SharedData shared_data_;
   SimpleTimeManager time_manager_;
   ThreadManager thread_manager_;

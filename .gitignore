@@ -1,0 +1,20 @@
+# ビルド成果物
+/bin/
+/obj/
+
+# 評価ファイル・定跡・教師データ（大容量のためリポジトリに入れない）
+*.bin
+!tests/data/*.bin
+*.psv
+*.ybb
+*.db
+kifu_db.txt
+learning_log.txt
+learning_material.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# テスト作業ディレクトリ
+/test-work/

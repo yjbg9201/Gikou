@@ -21,6 +21,7 @@
 #define LEARNING_H_
 
 #include <cassert>
+#include <vector>
 #include "common/arraymap.h"
 #include "common/iterator.h"
 #include "common/math.h"
@@ -29,6 +30,7 @@
 #include "common/range.h"
 #include "psq.h"
 #include "position.h"
+struct TeacherPosition;
 
 /**
  * 評価関数の学習を行うためのクラスです.
@@ -42,6 +44,19 @@ class Learning {
    */
   static void LearnEvaluationParameters(bool use_rootstrap,
                                         bool use_logistic_regression);
+
+  /**
+   * 評価関数パラメータの学習を、外部から与えた教師局面を使って行います（G1: やねうら王 PSV 教師など）.
+   * 主損失（棋譜の指し手との比較学習）は LearnEvaluationParameters() と同じで、kifu_db.txt が必要です。
+   * teacher_positions.bin / teacher_games.bin の代わりに、引数の教師局面を使います。
+   * RootStrap・ロジスティック回帰のミニバッチ（80,000局面）は復元抽出で作るため、
+   * 教師局面がそれより少ない場合はエラーで終了します。
+   * @param rootstrap_positions RootStrap に用いる教師局面（nullptr なら RootStrap を使わない）
+   * @param regression_positions 勝敗のロジスティック回帰に用いる教師局面（nullptr なら使わない）
+   */
+  static void LearnEvaluationParametersWithTeachers(
+      std::vector<TeacherPosition>* rootstrap_positions,
+      std::vector<TeacherPosition>* regression_positions);
 };
 
 /**

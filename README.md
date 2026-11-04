@@ -218,3 +218,10 @@ GitHub上での技巧のダウンロード数は、公開約１年で30000回を
 技巧をご愛用くださり、誠にありがとうございます。
 
 「技巧」開発者 出村洋介
+## このリポジトリでの改造（技巧2 からの追加機能）
+
+改造の親仕様書は [docs/gikou-ideas.md](docs/gikou-ideas.md) です。開発者向けの手順は [CLAUDE.md](CLAUDE.md) を参照してください。
+
+- **やねうら王定跡の読み込み（G2）**: `BookFile` にやねうら王形式の定跡（`.db` / `.ybb`、ペタショック定跡を含む）を指定できます。詳細は [docs/YANEURAOU_BOOK.md](docs/YANEURAOU_BOOK.md)。
+- **やねうら王 PSV 教師による学習（G1）**: `--learn-psv` など。詳細は [docs/PSV_LEARNING.md](docs/PSV_LEARNING.md)。
+- **評価関数の検証用コマンド（G3）**: `--evaldump` / `--randsfen` など。詳細は [docs/EVAL_TOOLS.md](docs/EVAL_TOOLS.md)。

@@ -84,6 +84,7 @@ $(directories):
 	mkdir -p $@
 
 $(object_dir)/%.o: %.cc
+	@mkdir -p $(dir $@)
 	$(CXX) -c -MMD -MP -o $@ $(CXXFLAGS) $(INCLUDES) $<
 
 -include $(dependencies)

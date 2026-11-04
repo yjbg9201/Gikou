@@ -20,7 +20,9 @@
 #include "cli.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <vector>
 #include <unordered_map>
 #include "common/array.h"
@@ -28,6 +30,7 @@
 #include "book.h"
 #include "cluster.h"
 #include "consultation.h"
+#include "eval_tools.h"
 #include "gamedb.h"
 #include "learning.h"
 #include "mate1ply.h"
@@ -36,15 +39,23 @@
 #include "move_probability.h"
 #include "position.h"
 #include "progress.h"
+#include "raw_position.h"
+#include "sfen_packer.h"
 #include "search.h"
 #include "teacher_data.h"
 #include "thinking.h"
 #include "usi.h"
 #include "usi_protocol.h"
+#include "yaneuraou_psv.h"
+#include "yaneura_book.h"
 
 #if !defined(MINIMUM)
 
 namespace {
+
+void ExecutePsvCommand(const std::string& command, int argc, char* argv[]);
+void ExecuteSfenPackCommand(bool pack);
+void BenchmarkYaneuraOuBook(int argc, char* argv[]);
 
 void BenchmarkSearch();
 void BenchmarkMoveGeneration(int num_calls);
@@ -116,12 +127,214 @@ void Cli::ExecuteCommand(int argc, char* argv[]) {
     MoveProbability::Learn();
   } else if (command == "--compute-ratings") {
     ComputePlayerRatings();
+  } else if (command == "--learn-psv" || command == "--learn-psv-rootstrap"
+             || command == "--convert-psv") {
+    ExecutePsvCommand(command, argc, argv);
+  } else if (command == "--psv-selftest") {
+    // G1: PackedSfen / Move16 / PSV 変換のセルフテスト
+    if (YaneuraOuPsv::RunSelfTest() != 0) std::exit(1);
+  } else if (command == "--sfen-pack") {
+    // G1/G2: SFEN（標準入力、1行1局面）をやねうら王互換 PackedSfen の16進表記に変換する（テスト用）
+    ExecuteSfenPackCommand(true);
+  } else if (command == "--sfen-unpack") {
+    // G1/G2: やねうら王互換 PackedSfen の16進表記（標準入力）を SFEN に変換する（テスト用）
+    ExecuteSfenPackCommand(false);
+  } else if (command == "--bench-yanebook") {
+    // G2: やねうら王定跡の読み込み時間と照合時間を計測する
+    // 使い方: --bench-yanebook <定跡ファイル> <局面ファイル（position コマンド形式）> [onthefly]
+    BenchmarkYaneuraOuBook(argc, argv);
+  } else if (command == "--randparams") {
+    // G3: テスト用のランダム params.bin を生成する
+    // 使い方: --randparams <出力ファイル> [seed] [amplitude]
+    const char* file_name = argc >= 3 ? argv[2] : "params.bin";
+    uint64_t seed = argc >= 4 ? std::strtoull(argv[3], nullptr, 10) : 1;
+    long amplitude = argc >= 5 ? std::strtol(argv[4], nullptr, 10) : 262144;
+    amplitude = std::max(0L, std::min(amplitude, 1L << 24));
+    bool ok = EvalTools::WriteRandomParams(file_name, seed, int32_t(amplitude));
+    std::printf("%s %s (seed=%llu, amplitude=%ld)\n", ok ? "Wrote" : "Failed to write",
+                file_name, (unsigned long long)seed, amplitude);
+    if (!ok) std::exit(1);
+  } else if (command == "--randsfen") {
+    // G3: ランダム自己対局による局面を生成し、SFENを標準出力に書き出す
+    // 使い方: --randsfen <局面数> [seed] [最大手数]
+    int num = argc >= 3 ? std::atoi(argv[2]) : 100;
+    uint64_t seed = argc >= 4 ? std::strtoull(argv[3], nullptr, 10) : 1;
+    int max_ply = argc >= 5 ? std::atoi(argv[4]) : 128;
+    EvalTools::GenerateRandomSfens(num, seed, max_ply, stdout);
+  } else if (command == "--evaldump") {
+    // G3: 局面ごとの評価値・進行度・項目別内訳を JSON Lines で出力する
+    // 使い方: --evaldump [入力ファイル]（省略時は標準入力）
+    int num_errors = 0;
+    if (argc >= 3 && std::string(argv[2]) != "-") {
+      std::ifstream in(argv[2]);
+      if (!in) {
+        std::fprintf(stderr, "Failed to open %s.\n", argv[2]);
+        std::exit(1);
+      }
+      num_errors = EvalTools::DumpEvaluation(in, stdout);
+    } else {
+      num_errors = EvalTools::DumpEvaluation(std::cin, stdout);
+    }
+    if (num_errors != 0) std::exit(1);
+  } else if (command == "--eval-selftest") {
+    // G3: PP対称性と、差分評価・全計算の一致を検査する
+    // 使い方: --eval-selftest [対局数] [seed]
+    int num_games = argc >= 3 ? std::atoi(argv[2]) : 20;
+    uint64_t seed = argc >= 4 ? std::strtoull(argv[3], nullptr, 10) : 1;
+    if (EvalTools::RunSelfTest(num_games, seed) != 0) std::exit(1);
   } else {
     std::printf("CLI: No such command. %s\n", command.c_str());
   }
 }
 
 namespace {
+
+/**
+ * G1: やねうら王の PSV 教師を使った学習・変換コマンドを実行します.
+ *
+ *   --learn-psv <psv> [scale=1.0] [eval_limit=3000] [max=0]
+ *       RootStrap と勝敗のロジスティック回帰の両方の教師に PSV を使って学習する
+ *       （--learn-with-regression の teacher_positions.bin / teacher_games.bin を PSV で置き換えたもの）
+ *   --learn-psv-rootstrap <psv> [scale=1.0] [eval_limit=3000] [max=0]
+ *       RootStrap の教師に PSV を使って学習する（--learn-with-rootstrap 相当）
+ *   --convert-psv <psv> [scale=1.0] [eval_limit=3000] [max=0] [positions=teacher_positions.bin] [games=teacher_games.bin]
+ *       PSV を技巧の教師データファイルに変換する（--learn-with-regression 等でそのまま使える）
+ */
+void ExecutePsvCommand(const std::string& command, int argc, char* argv[]) {
+  if (argc < 3) {
+    std::printf("Usage: %s <psv file> [scale=1.0] [eval_limit=3000] [max=0]%s\n", command.c_str(),
+                command == "--convert-psv" ? " [positions=teacher_positions.bin] [games=teacher_games.bin]" : "");
+    std::exit(1);
+  }
+  const std::string psv_file = argv[2];
+  PsvOptions options;
+  std::string positions_file = "teacher_positions.bin", games_file = "teacher_games.bin";
+  for (int i = 3; i < argc; ++i) {
+    const std::string arg = argv[i];
+    std::string error;
+    if (command == "--convert-psv" && arg.compare(0, 10, "positions=") == 0) {
+      positions_file = arg.substr(10);
+    } else if (command == "--convert-psv" && arg.compare(0, 6, "games=") == 0) {
+      games_file = arg.substr(6);
+    } else if (!options.Parse(arg, &error)) {
+      std::printf("Error: %s\n", error.c_str());
+      std::exit(1);
+    }
+  }
+  std::printf("PSV: file=%s scale=%g eval_limit=%d max=%llu\n", psv_file.c_str(),
+              options.scale, options.eval_limit, (unsigned long long)options.max_records);
+
+  const bool use_regression = command != "--learn-psv-rootstrap";
+  std::vector<TeacherPosition> rootstrap, regression;
+  PsvStats stats;
+  if (!YaneuraOuPsv::ReadFile(psv_file, options, &rootstrap,
+                              use_regression ? &regression : nullptr, &stats)) {
+    std::exit(1);
+  }
+  stats.Print();
+
+  if (command == "--convert-psv") {
+    auto write = [](const std::string& file_name, const std::vector<TeacherPosition>& data) {
+      std::FILE* fp = std::fopen(file_name.c_str(), "wb");
+      if (fp == nullptr
+          || (!data.empty() && std::fwrite(data.data(), sizeof(TeacherPosition), data.size(), fp) != data.size())) {
+        std::printf("Error: failed to write %s.\n", file_name.c_str());
+        std::exit(1);
+      }
+      std::fclose(fp);
+      std::printf("Wrote %zu positions to %s.\n", data.size(), file_name.c_str());
+    };
+    write(positions_file, rootstrap);
+    write(games_file, regression);
+    return;
+  }
+
+  Learning::LearnEvaluationParametersWithTeachers(&rootstrap, use_regression ? &regression : nullptr);
+}
+
+/**
+ * SFEN ⇔ やねうら王互換 PackedSfen（16進）の変換（テスト用）.
+ * 不正な入力行には "error: ..." を出力します.
+ */
+void ExecuteSfenPackCommand(bool pack) {
+  for (std::string line; std::getline(std::cin, line);) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (line.empty()) continue;
+    if (pack) {
+      if (line.compare(0, 5, "sfen ") == 0) line = line.substr(5);
+      RawPosition raw;
+      PackedSfen packed;
+      std::string error;
+      if (!raw.ParseSfen(line, &error)) {
+        std::printf("error: %s\n", error.c_str());
+      } else if (!SfenPacker::Pack(raw, &packed)) {
+        std::printf("error: cannot pack\n");
+      } else {
+        std::printf("%s\n", SfenPacker::ToHex(packed).c_str());
+      }
+    } else {
+      PackedSfen packed;
+      RawPosition raw;
+      bool piece_box = false;
+      if (!SfenPacker::FromHex(line, &packed) || !SfenPacker::Unpack(packed, &raw, &piece_box)) {
+        std::printf("error: invalid packed sfen\n");
+      } else {
+        std::printf("%s\n", raw.ToSfen(1).c_str());
+      }
+    }
+  }
+}
+
+/**
+ * やねうら王定跡の読み込み時間と、照合（Probe）1回あたりの時間を計測します.
+ */
+void BenchmarkYaneuraOuBook(int argc, char* argv[]) {
+  if (argc < 4) {
+    std::printf("Usage: --bench-yanebook <book file> <positions file> [onthefly]\n");
+    std::exit(1);
+  }
+  std::string book_file = argv[2];
+  const bool on_the_fly = argc >= 5 && std::string(argv[4]) == "onthefly";
+  const YaneuraOuBook::Format format = YaneuraOuBook::DetectFormat(book_file, &book_file);
+  if (format == YaneuraOuBook::kGikouFormat) {
+    std::printf("Not a YaneuraOu book: %s\n", book_file.c_str());
+    std::exit(1);
+  }
+  YaneuraOuBook book;
+  SimpleTimer load_timer;
+  if (!book.Load(book_file, format, on_the_fly)) std::exit(1);
+  std::printf("load: %.2f sec, %llu positions\n", load_timer.GetElapsedSeconds(),
+              (unsigned long long)book.num_positions());
+
+  std::vector<Position> positions;
+  std::ifstream in(argv[3]);
+  for (std::string line; std::getline(in, line);) {
+    Position pos;
+    std::string error;
+    if (!line.empty() && ParsePositionCommand(line, &pos, &error)) positions.push_back(pos);
+  }
+  if (positions.empty()) {
+    std::printf("No positions in %s\n", argv[3]);
+    std::exit(1);
+  }
+  int hits = 0, flipped_hits = 0;
+  std::vector<YaneBookMove> moves;
+  const int kRepeat = 10;
+  SimpleTimer probe_timer;
+  for (int r = 0; r < kRepeat; ++r) {
+    for (const Position& pos : positions) {
+      bool flipped = false;
+      if (book.Probe(pos, true, &moves, &flipped) && r == 0) {
+        ++hits;
+        flipped_hits += flipped;
+      }
+    }
+  }
+  const double elapsed = probe_timer.GetElapsedSeconds();
+  std::printf("probe: %zu positions x %d, hits=%d (flipped=%d), %.2f microseconds/probe\n",
+              positions.size(), kRepeat, hits, flipped_hits,
+              1e6 * elapsed / double(positions.size() * kRepeat));
+}
 
 /**
  * 探索のベンチマークを行います.
