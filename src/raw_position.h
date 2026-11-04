@@ -63,6 +63,11 @@ struct RawPosition {
   bool ParseSfen(const std::string& sfen, std::string* error = nullptr);
 
   /**
+   * 駒種ごとの最大枚数（玉は各手番1枚まで）と、駒の値の範囲を検査します.
+   */
+  bool Validate(std::string* error = nullptr) const;
+
+  /**
    * SFEN 文字列を返します（持ち駒は飛角金銀桂香歩の順、先手→後手）.
    * @param ply 末尾に付ける手数（0 以下なら手数を付けない）
    */

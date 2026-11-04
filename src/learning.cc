@@ -1034,8 +1034,62 @@ float ComputeAccuracy(const std::vector<Game>& games) {
 
 } // namespace
 
+namespace {
+
+/**
+ * 教師局面ファイル（teacher_positions.bin / teacher_games.bin）を読み込みます.
+ * ファイルが開けない場合は、エラーメッセージを表示して終了します.
+ */
+std::vector<TeacherPosition> ReadTeacherPositions(const char* file_name) {
+  std::vector<TeacherPosition> positions;
+  std::FILE* teacher_file = std::fopen(file_name, "rb");
+  if (teacher_file == nullptr) {
+    std::printf("Error: failed to open %s.\n", file_name);
+    std::exit(1);
+  }
+  for (TeacherPosition buf; std::fread(&buf, sizeof(buf), 1, teacher_file); ) {
+    positions.push_back(buf);
+  }
+  std::fclose(teacher_file);
+  return positions;
+}
+
+/**
+ * 教師局面の数が、ミニバッチ（復元抽出）を作るのに十分であることを確認します.
+ * 不足している場合は、未定義動作になるのを避けるため、エラーメッセージを表示して終了します.
+ */
+void CheckNumTeacherPositions(const std::vector<TeacherPosition>& positions,
+                              const size_t batch_size, const char* name) {
+  if (positions.size() < batch_size) {
+    std::printf("Error: %s has only %zu positions, but at least %zu positions are required "
+                "(mini-batch size).\n", name, positions.size(), batch_size);
+    std::exit(1);
+  }
+}
+
+void LearnImpl(bool use_rootstrap, bool use_logistic_regression,
+               std::vector<TeacherPosition>* preloaded_rootstrap,
+               std::vector<TeacherPosition>* preloaded_regression);
+
+} // namespace
+
 void Learning::LearnEvaluationParameters(const bool use_rootstrap,
                                          const bool use_logistic_regression) {
+  LearnImpl(use_rootstrap, use_logistic_regression, nullptr, nullptr);
+}
+
+void Learning::LearnEvaluationParametersWithTeachers(
+    std::vector<TeacherPosition>* const rootstrap_positions,
+    std::vector<TeacherPosition>* const regression_positions) {
+  LearnImpl(rootstrap_positions != nullptr, regression_positions != nullptr,
+            rootstrap_positions, regression_positions);
+}
+
+namespace {
+
+void LearnImpl(const bool use_rootstrap, const bool use_logistic_regression,
+               std::vector<TeacherPosition>* const preloaded_rootstrap,
+               std::vector<TeacherPosition>* const preloaded_regression) {
   // スレッド数の設定
   const int num_threads = std::max(1U, std::thread::hardware_concurrency());
   omp_set_num_threads(num_threads);
@@ -1058,27 +1112,36 @@ void Learning::LearnEvaluationParameters(const bool use_rootstrap,
       position_ids.emplace_back(i, j);
     }
   }
+  if (position_ids.size() < size_t(kBatchSize)) {
+    std::printf("Error: the game database (%s) has only %zu positions, but at least %d positions "
+                "are required (mini-batch size).\n",
+                GameDatabase::kDefaultDatabaseFile, position_ids.size(), kBatchSize);
+    std::exit(1);
+  }
 
   // RootStrapに用いる教師局面を読み込む
   std::vector<TeacherPosition> rootstrap_positions;
   if (use_rootstrap) {
-    std::printf("Read the teacher positions from the file.\n");
-    std::FILE* teacher_file = std::fopen("teacher_positions.bin", "rb");
-    for (TeacherPosition buf; std::fread(&buf, sizeof(buf), 1, teacher_file); ) {
-      rootstrap_positions.push_back(buf);
+    if (preloaded_rootstrap != nullptr) {
+      rootstrap_positions.swap(*preloaded_rootstrap);
+    } else {
+      std::printf("Read the teacher positions from the file.\n");
+      rootstrap_positions = ReadTeacherPositions("teacher_positions.bin");
     }
-    std::fclose(teacher_file);
+    CheckNumTeacherPositions(rootstrap_positions, kRootStrapBatchSize, "RootStrap teacher data");
   }
 
   // ロジスティック回帰に用いる教師局面を読み込む
   std::vector<TeacherPosition> logistic_regression_positions;
   if (use_logistic_regression) {
-    std::printf("Read the teacher games from the file.\n");
-    std::FILE* teacher_file = std::fopen("teacher_games.bin", "rb");
-    for (TeacherPosition buf; std::fread(&buf, sizeof(buf), 1, teacher_file); ) {
-      logistic_regression_positions.push_back(buf);
+    if (preloaded_regression != nullptr) {
+      logistic_regression_positions.swap(*preloaded_regression);
+    } else {
+      std::printf("Read the teacher games from the file.\n");
+      logistic_regression_positions = ReadTeacherPositions("teacher_games.bin");
     }
-    std::fclose(teacher_file);
+    CheckNumTeacherPositions(logistic_regression_positions, kLogisticRegressionBatchSize,
+                             "logistic regression teacher data");
   }
 
   // 乱数発生器（メルセンヌ・ツイスタ）の準備
@@ -1345,5 +1408,7 @@ void Learning::LearnEvaluationParameters(const bool use_rootstrap,
 
   std::printf("Congratulations! Learning is successfully finished!\n");
 }
+
+} // namespace
 
 #endif // !defined(MINIMUM)

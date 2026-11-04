@@ -185,12 +185,21 @@ bool RawPosition::ParseSfen(const std::string& sfen, std::string* error) {
     game_ply = ply;
   }
 
-  // 5. 駒数の検査（駒種ごとの最大枚数、玉は各手番1枚まで）
+  // 5. 駒数の検査
+  return Validate(error);
+}
+
+bool RawPosition::Validate(std::string* error) const {
+  // 駒種ごとの最大枚数、玉は各手番1枚まで
   int counts[9] = {0};
   int kings[2] = {0, 0};
   for (int sq = 0; sq < 81; ++sq) {
     if (board[sq] == 0) continue;
     const int pt = board[sq] & 15;
+    if (board[sq] >= 32 || pt == 0 || pt == kGold + 8) {
+      SetError(error, "invalid piece value");
+      return false;
+    }
     if (pt == kKing) {
       kings[board[sq] >> 4]++;
     } else {
@@ -210,6 +219,10 @@ bool RawPosition::ParseSfen(const std::string& sfen, std::string* error) {
   }
   if (kings[0] > 1 || kings[1] > 1) {
     SetError(error, "too many kings");
+    return false;
+  }
+  if (side_to_move != kBlack && side_to_move != kWhite) {
+    SetError(error, "invalid side to move");
     return false;
   }
 
@@ -334,9 +347,27 @@ Move FindLegalMoveFromUsi(const Position& pos, const std::string& usi_move) {
   if (usi_move.size() < 4 || usi_move.size() > 5) {
     return kMoveNone;
   }
-  for (const ExtMove& em : SimpleMoveList<kAllMoves, true>(pos)) {
+  const SimpleMoveList<kAllMoves, true> legal_moves(pos);
+  for (const ExtMove& em : legal_moves) {
     if (em.move.ToSfen() == usi_move) {
       return em.move;
+    }
+  }
+
+  // 技巧の指し手生成は「常に損な手」（歩・角・飛の不成、2段目への香の不成など）を生成しないが、
+  // ルール上は合法なので、定跡や教師データに現れたら受け付ける。
+  // 成る手が合法で、不成でも行きどころのない駒にならなければ、不成の手も合法である。
+  if (usi_move.size() == 4 && usi_move[1] != '*') {
+    const std::string promotion = usi_move + "+";
+    for (const ExtMove& em : legal_moves) {
+      if (em.move.ToSfen() != promotion) continue;
+      const Move m = em.move;
+      const Color stm = pos.side_to_move();
+      const Rank rank = relative_rank(stm, m.to().rank());
+      const PieceType pt = m.piece().type();
+      if ((pt == kPawn || pt == kLance) && rank == kRank1) return kMoveNone;
+      if (pt == kKnight && rank <= kRank2) return kMoveNone;
+      return Move(m.piece(), m.from(), m.to(), false, m.captured_piece());
     }
   }
   return kMoveNone;
