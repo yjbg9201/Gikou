@@ -42,10 +42,17 @@ tests/run_all.sh            # 各タスクのセルフテスト一式
 | `--learn-psv-rootstrap <psv> [opts]` | G1 | PSV 教師で RootStrap のみ使って学習 |
 | `--convert-psv <psv> [opts]` | G1 | PSV を teacher_positions.bin / teacher_games.bin に変換 |
 | `--psv-selftest` | G1 | PackedSfen / Move16 変換のセルフテスト |
-| `--yanebook-selftest` | G2 | やねうら王定跡の照合・反転・選択のセルフテスト |
+| `--sfen-pack` / `--sfen-unpack` | G1/G2 | SFEN ⇔ やねうら王互換 PackedSfen（16進）の変換（テスト用） |
 
 詳細: [`docs/EVAL_TOOLS.md`](docs/EVAL_TOOLS.md)（G3）、[`docs/PSV_LEARNING.md`](docs/PSV_LEARNING.md)（G1）、
 [`docs/YANEURAOU_BOOK.md`](docs/YANEURAOU_BOOK.md)（G2）。
+
+## やねうら王定跡（G2）
+
+`BookFile` に `.db` / `.ybb` を指定すると、ヘッダ（または拡張子）で判別して `src/yaneura_book.cc` で読み込む。
+それ以外は従来どおり技巧形式（`src/book.cc`）。新規 USI オプション: `BookIgnoreRate`, `BookEvalDiff`,
+`BookEvalBlackLimit`, `BookEvalWhiteLimit`, `BookDepthLimit`, `ConsiderBookMoveCount`, `FlippedBook`, `BookOnTheFly`。
+`BookMaxPly` の上限は 10000（既定値 20 は不変）。
 
 ## 原則
 

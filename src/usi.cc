@@ -327,8 +327,32 @@ UsiOptions::UsiOptions() {
   // 定跡ファイル
   map_.emplace("BookFile", UsiOption("book.bin"));
 
-  // 定跡を用いる最大手数
-  map_.emplace("BookMaxPly", UsiOption(20, 0, 50));
+  // 定跡を用いる最大手数（やねうら王形式の大きな定跡のため、上限を50から10000に拡張。既定値は従来どおり）
+  map_.emplace("BookMaxPly", UsiOption(20, 0, 10000));
+
+  // --- やねうら王形式の定跡（.db / .ybb）用のオプション（G2）。技巧形式の book.bin には影響しない ---
+
+  // 一定の確率（%）で定跡を無視して自力で思考する
+  map_.emplace("BookIgnoreRate", UsiOption(0, 0, 100));
+
+  // 定跡の最善手との評価値の差が、この値以内の手のみを選ぶ
+  map_.emplace("BookEvalDiff", UsiOption(30, 0, 99999));
+
+  // 先手番・後手番のとき、評価値（手番側から見た値）がこの値未満の定跡手は選ばない
+  map_.emplace("BookEvalBlackLimit", UsiOption(0, -99999, 99999));
+  map_.emplace("BookEvalWhiteLimit", UsiOption(-140, -99999, 99999));
+
+  // 定跡の最善手の探索深さがこの値未満なら、その局面では定跡を使わない（0なら無視。depthのない定跡でも無視）
+  map_.emplace("BookDepthLimit", UsiOption(16, 0, 99999));
+
+  // 定跡手を採択回数に比例した確率で選ぶ
+  map_.emplace("ConsiderBookMoveCount", UsiOption(false));
+
+  // 先後反転した局面が定跡にあれば、それを使う
+  map_.emplace("FlippedBook", UsiOption(true));
+
+  // .ybb定跡をメモリに読み込まず、ディスク上で探す
+  map_.emplace("BookOnTheFly", UsiOption(false));
 
 #if 0
   // 定跡手の評価値のしきい値（先手番）（先手番側から見た評価値がこの値未満の定跡手は選択しない）

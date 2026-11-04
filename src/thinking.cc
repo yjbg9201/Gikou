@@ -36,7 +36,18 @@ Thinking::Thinking(const UsiOptions& usi_options)
 }
 
 void Thinking::Initialize() {
-  book_.ReadFromFile(usi_options_["BookFile"].string().c_str());
+  // 定跡ファイルの形式を判別する（技巧形式の book.bin の読み込み方は、従来どおり）
+  std::string book_file = usi_options_["BookFile"].string();
+  const YaneuraOuBook::Format format = YaneuraOuBook::DetectFormat(book_file, &book_file);
+  if (format == YaneuraOuBook::kGikouFormat) {
+    use_yaneura_book_ = false;
+    yaneura_book_.Clear();
+    book_.ReadFromFile(book_file.c_str());
+  } else {
+    // やねうら王形式（.db / .ybb）。読み込みに失敗しても、エンジンは定跡なしで動作を続ける
+    use_yaneura_book_ = true;
+    yaneura_book_.Load(book_file, format, usi_options_["BookOnTheFly"]);
+  }
   shared_data_.hash_table.SetSize(usi_options_["USI_Hash"]);
   shared_data_.countermoves_history.Clear();
   MoveProbability::SetCacheTableSize(ProbabilityCacheTable::kDefaultSize * usi_options_["Threads"]);
@@ -90,11 +101,15 @@ void Thinking::StartThinking(const Node& root_node,
       && usi_options_["OwnBook"]
       && root_node.game_ply() + 1 <= usi_options_["BookMaxPly"]) {
     // 定跡DBから１手取得する
-    Move book_move = book_.GetOneBookMove(root_node, usi_options_);
+    Move book_ponder_move = kMoveNone;
+    Move book_move = use_yaneura_book_
+                   ? yaneura_book_.GetOneBookMove(root_node, usi_options_, &book_ponder_move)
+                   : book_.GetOneBookMove(root_node, usi_options_);
 
     // 定跡存在するときは、通常探索をスキップする
     if (book_move != kMoveNone) {
       best_move = book_move;
+      ponder_move = book_ponder_move;
       goto send_best_move;
     }
   }

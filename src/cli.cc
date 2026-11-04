@@ -47,6 +47,7 @@
 #include "usi.h"
 #include "usi_protocol.h"
 #include "yaneuraou_psv.h"
+#include "yaneura_book.h"
 
 #if !defined(MINIMUM)
 
@@ -54,6 +55,7 @@ namespace {
 
 void ExecutePsvCommand(const std::string& command, int argc, char* argv[]);
 void ExecuteSfenPackCommand(bool pack);
+void BenchmarkYaneuraOuBook(int argc, char* argv[]);
 
 void BenchmarkSearch();
 void BenchmarkMoveGeneration(int num_calls);
@@ -137,6 +139,10 @@ void Cli::ExecuteCommand(int argc, char* argv[]) {
   } else if (command == "--sfen-unpack") {
     // G1/G2: やねうら王互換 PackedSfen の16進表記（標準入力）を SFEN に変換する（テスト用）
     ExecuteSfenPackCommand(false);
+  } else if (command == "--bench-yanebook") {
+    // G2: やねうら王定跡の読み込み時間と照合時間を計測する
+    // 使い方: --bench-yanebook <定跡ファイル> <局面ファイル（position コマンド形式）> [onthefly]
+    BenchmarkYaneuraOuBook(argc, argv);
   } else if (command == "--randparams") {
     // G3: テスト用のランダム params.bin を生成する
     // 使い方: --randparams <出力ファイル> [seed] [amplitude]
@@ -277,6 +283,57 @@ void ExecuteSfenPackCommand(bool pack) {
       }
     }
   }
+}
+
+/**
+ * やねうら王定跡の読み込み時間と、照合（Probe）1回あたりの時間を計測します.
+ */
+void BenchmarkYaneuraOuBook(int argc, char* argv[]) {
+  if (argc < 4) {
+    std::printf("Usage: --bench-yanebook <book file> <positions file> [onthefly]\n");
+    std::exit(1);
+  }
+  std::string book_file = argv[2];
+  const bool on_the_fly = argc >= 5 && std::string(argv[4]) == "onthefly";
+  const YaneuraOuBook::Format format = YaneuraOuBook::DetectFormat(book_file, &book_file);
+  if (format == YaneuraOuBook::kGikouFormat) {
+    std::printf("Not a YaneuraOu book: %s\n", book_file.c_str());
+    std::exit(1);
+  }
+  YaneuraOuBook book;
+  SimpleTimer load_timer;
+  if (!book.Load(book_file, format, on_the_fly)) std::exit(1);
+  std::printf("load: %.2f sec, %llu positions\n", load_timer.GetElapsedSeconds(),
+              (unsigned long long)book.num_positions());
+
+  std::vector<Position> positions;
+  std::ifstream in(argv[3]);
+  for (std::string line; std::getline(in, line);) {
+    Position pos;
+    std::string error;
+    if (!line.empty() && ParsePositionCommand(line, &pos, &error)) positions.push_back(pos);
+  }
+  if (positions.empty()) {
+    std::printf("No positions in %s\n", argv[3]);
+    std::exit(1);
+  }
+  int hits = 0, flipped_hits = 0;
+  std::vector<YaneBookMove> moves;
+  const int kRepeat = 10;
+  SimpleTimer probe_timer;
+  for (int r = 0; r < kRepeat; ++r) {
+    for (const Position& pos : positions) {
+      bool flipped = false;
+      if (book.Probe(pos, true, &moves, &flipped) && r == 0) {
+        ++hits;
+        flipped_hits += flipped;
+      }
+    }
+  }
+  const double elapsed = probe_timer.GetElapsedSeconds();
+  std::printf("probe: %zu positions x %d, hits=%d (flipped=%d), %.2f microseconds/probe\n",
+              positions.size(), kRepeat, hits, flipped_hits,
+              1e6 * elapsed / double(positions.size() * kRepeat));
 }
 
 /**
